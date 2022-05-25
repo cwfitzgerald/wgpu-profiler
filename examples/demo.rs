@@ -19,6 +19,7 @@ fn scopes_to_console_recursive(results: &[GpuTimerScopeResult], indentation: u32
 }
 
 fn console_output(results: &Option<Vec<GpuTimerScopeResult>>) {
+    profiling::scope!("console output");
     print!("\x1B[2J\x1B[1;1H"); // Clear terminal and put cursor to first row first column
     println!("Welcome to wgpu_profiler demo!");
     println!("Press space to write out a trace file that can be viewed in chrome's chrome://tracing");
@@ -32,6 +33,9 @@ fn console_output(results: &Option<Vec<GpuTimerScopeResult>>) {
 }
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
+    #[cfg(feature = "tracy")]
+    tracy_client::Client::start();
+
     let size = window.inner_size();
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let surface = unsafe { instance.create_surface(&window) };
@@ -101,7 +105,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     surface.configure(&device, &sc_desc);
 
     // Create a new profiler instance
-    let mut profiler = GpuProfiler::new(4, queue.get_timestamp_period());
+    let mut profiler = GpuProfiler::new(adapter.get_info().backend, &device, &queue, 4);
     let mut latest_profiler_results = None;
 
     event_loop.run(move |event, _, control_flow| {
@@ -132,6 +136,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                 wgpu_profiler!("rendering", &mut profiler, &mut encoder, &device, {
+                    profiling::scope!("rendering");
+
                     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: None,
                         color_attachments: &[wgpu::RenderPassColorAttachment {
@@ -188,6 +194,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     latest_profiler_results = Some(results);
                 }
                 console_output(&latest_profiler_results);
+
+                profiling::finish_frame!();
             }
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {

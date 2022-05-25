@@ -9,6 +9,8 @@ pub mod macros;
 /// Scope types that wrap a `wgpu` encoder/pass and start a scope on creation. In most cases, they
 /// then allow automatically ending the scope on drop.
 pub mod scope;
+#[cfg(feature = "tracy")]
+mod tracy;
 
 pub struct GpuTimerScopeResult {
     pub label: String,
@@ -33,6 +35,9 @@ pub struct GpuProfiler {
 
     max_num_pending_frames: usize,
     timestamp_to_sec: f64,
+
+    #[cfg(feature = "tracy")]
+    tracy_gpu_context: tracy_client::GpuContext,
 }
 
 // Public interface
@@ -53,7 +58,8 @@ impl GpuProfiler {
     /// (Typical values for `max_num_pending_frames` are 2~4)
     ///
     /// `timestamp_period` needs to be set to the result of [`wgpu::Queue::get_timestamp_period`]
-    pub fn new(max_num_pending_frames: usize, timestamp_period: f32) -> Self {
+    pub fn new(backend: wgpu::Backend, device: &wgpu::Device, queue: &wgpu::Queue, max_num_pending_frames: usize) -> Self {
+        let timestamp_period = queue.get_timestamp_period();
         assert!(max_num_pending_frames > 0);
         GpuProfiler {
             enable_timer: true,
@@ -72,6 +78,9 @@ impl GpuProfiler {
 
             max_num_pending_frames,
             timestamp_to_sec: timestamp_period as f64 / 1000.0 / 1000.0 / 1000.0,
+
+            #[cfg(feature = "tracy")]
+            tracy_gpu_context: tracy::create_tracy_gpu_client(backend, device, queue, timestamp_period),
         }
     }
 
@@ -82,6 +91,7 @@ impl GpuProfiler {
     /// May create new wgpu query objects (which is why it needs a [`wgpu::Device`] reference)
     ///
     /// See also [`wgpu_profiler!`], [`GpuProfiler::end_scope`]
+    #[track_caller]
     pub fn begin_scope<Recorder: ProfilerCommandRecorder>(&mut self, label: &str, encoder_or_pass: &mut Recorder, device: &wgpu::Device) {
         if self.enable_timer {
             let start_query = self.allocate_query_pair(device);
@@ -94,7 +104,12 @@ impl GpuProfiler {
             self.open_scopes.push(UnprocessedTimerScope {
                 label: String::from(label),
                 start_query,
-                ..Default::default()
+                nested_scopes: Vec::new(),
+                #[cfg(feature = "tracy")]
+                tracy_span: {
+                    let location = std::panic::Location::caller();
+                    self.tracy_gpu_context.span_alloc(label, "", location.file(), location.line())
+                },
             });
         }
         if self.enable_debug_marker {
@@ -109,11 +124,13 @@ impl GpuProfiler {
     /// See also [`wgpu_profiler!`], [`GpuProfiler::begin_scope`]
     pub fn end_scope<Recorder: ProfilerCommandRecorder>(&mut self, encoder_or_pass: &mut Recorder) {
         if self.enable_timer {
-            let open_scope = self.open_scopes.pop().expect("No profiler GpuProfiler scope was previously opened");
+            let mut open_scope = self.open_scopes.pop().expect("No profiler GpuProfiler scope was previously opened");
             encoder_or_pass.write_timestamp(
                 &self.active_frame.query_pools[open_scope.start_query.pool_idx as usize].query_set,
                 open_scope.start_query.query_idx + 1,
             );
+            #[cfg(feature = "tracy")]
+            open_scope.tracy_span.end_zone();
             if let Some(open_parent_scope) = self.open_scopes.last_mut() {
                 open_parent_scope.nested_scopes.push(open_scope);
             } else {
@@ -301,6 +318,9 @@ impl GpuProfiler {
                         .unwrap(),
                 );
 
+                #[cfg(feature = "tracy")]
+                scope.tracy_span.upload_timestamp(start_raw as _, end_raw as _);
+
                 GpuTimerScopeResult {
                     label: scope.label,
                     time: (start_raw as f64 * timestamp_to_sec)..(end_raw as f64 * timestamp_to_sec),
@@ -317,11 +337,13 @@ struct QueryPoolQueryAddress {
     query_idx: u32,
 }
 
-#[derive(Default)]
 struct UnprocessedTimerScope {
     label: String,
     start_query: QueryPoolQueryAddress,
     nested_scopes: Vec<UnprocessedTimerScope>,
+
+    #[cfg(feature = "tracy")]
+    tracy_span: tracy_client::GpuSpan,
 }
 
 struct QueryPool {
