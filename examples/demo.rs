@@ -36,6 +36,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     #[cfg(feature = "tracy")]
     tracy_client::Client::start();
 
+    std::thread::sleep(std::time::Duration::from_secs(4));
+
     let size = window.inner_size();
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let surface = unsafe { instance.create_surface(&window) };
@@ -99,7 +101,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         height: size.height,
         // By using the Fifo mode we ensure that CPU waits for GPU, thus we won't have an arbitrary amount of frames in flight that may be discarded.
         // Profiler works just fine in any other mode, but keep in mind that this can mean that it would need to buffer up many more frames until the first results are back.
-        present_mode: wgpu::PresentMode::Fifo,
+        present_mode: wgpu::PresentMode::Immediate,
     };
 
     surface.configure(&device, &sc_desc);
@@ -193,7 +195,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 if let Some(results) = profiler.process_finished_frame() {
                     latest_profiler_results = Some(results);
                 }
-                console_output(&latest_profiler_results);
+                // console_output(&latest_profiler_results);
 
                 profiling::finish_frame!();
             }

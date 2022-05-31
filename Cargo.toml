@@ -18,15 +18,15 @@ tracy = ["dep:tracy-client"]
 [dependencies]
 bytemuck = { version = "1", default-features = false }
 wgpu = "0.12"
-futures-lite = "1"
-tracy-client = { git = "https://github.com/cwfitzgerald/rust_tracy_client.git", rev = "cdb6e034989cd645ce26f04901b29c183b5dfd9d", default-features = false, optional = true }
+tracy-client = { git = "https://github.com/cwfitzgerald/rust_tracy_client.git", rev = "1f3a677c5e4eab6fc8b6e7344f2adc131cf6041f", default-features = false, optional = true }
 
 [dev-dependencies]
 profiling = { git = "https://github.com/aclysma/profiling.git", rev = "59fc51454c9a1e086289363ba1f26ab99626f6dd", version = "1", features = ["profile-with-tracy"] }
-tracy-client = { git = "https://github.com/cwfitzgerald/rust_tracy_client.git", rev = "cdb6e034989cd645ce26f04901b29c183b5dfd9d", default-features = false, features = ["enable"] }
+tracy-client = { git = "https://github.com/cwfitzgerald/rust_tracy_client.git", rev = "1f3a677c5e4eab6fc8b6e7344f2adc131cf6041f", default-features = false, features = ["enable"] }
 winit = "0.26.0"
 #env_logger = "0.8.2"
 
 [patch.crates-io]
 profiling = { git = "https://github.com/aclysma/profiling.git", rev = "59fc51454c9a1e086289363ba1f26ab99626f6dd" }
-tracy-client = { git = "https://github.com/cwfitzgerald/rust_tracy_client.git", rev = "cdb6e034989cd645ce26f04901b29c183b5dfd9d" }
+tracy-client = { git = "https://github.com/cwfitzgerald/rust_tracy_client.git", rev = "1f3a677c5e4eab6fc8b6e7344f2adc131cf6041f" }
+wgpu = { path = "../wgpu/wgpu" }

@@ -1,8 +1,11 @@
-use futures_lite::{
-    future::{block_on, poll_once},
-    Future, FutureExt,
+use std::{
+    convert::TryInto,
+    ops::Range,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
-use std::{convert::TryInto, ops::Range, pin::Pin};
 
 pub mod chrometrace;
 pub mod macros;
@@ -191,7 +194,10 @@ impl GpuProfiler {
 
         // Map all buffers.
         for pool in self.active_frame.query_pools.iter_mut() {
-            pool.buffer_mapping = Some(pool.resolved_buffer_slice().map_async(wgpu::MapMode::Read).boxed());
+            let buffer_mapping_done = pool.buffer_mapping_done.clone();
+            buffer_mapping_done.store(false, Ordering::Relaxed);
+            pool.resolved_buffer_slice()
+                .map_async(wgpu::MapMode::Read, move |_| buffer_mapping_done.store(true, Ordering::Release));
         }
 
         // Enqueue
@@ -209,11 +215,7 @@ impl GpuProfiler {
         let frame = self.pending_frames.first_mut()?;
 
         // We only process if all mappings succeed.
-        if frame
-            .query_pools
-            .iter_mut()
-            .any(|pool| block_on(poll_once(pool.buffer_mapping.as_mut().unwrap())).is_none())
-        {
+        if !frame.query_pools.iter_mut().all(|pool| pool.buffer_mapping_done.load(Ordering::Acquire)) {
             return None;
         }
 
@@ -350,8 +352,7 @@ struct QueryPool {
     query_set: wgpu::QuerySet,
 
     buffer: wgpu::Buffer,
-    #[allow(clippy::type_complexity)]
-    buffer_mapping: Option<Pin<Box<dyn Future<Output = std::result::Result<(), wgpu::BufferAsyncError>> + Send>>>,
+    buffer_mapping_done: Arc<AtomicBool>,
 
     capacity: u32,
     num_used_queries: u32,
@@ -375,7 +376,7 @@ impl QueryPool {
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             }),
-            buffer_mapping: None,
+            buffer_mapping_done: Arc::new(AtomicBool::new(false)),
 
             capacity,
             num_used_queries: 0,
@@ -386,7 +387,7 @@ impl QueryPool {
     fn reset(&mut self) {
         self.num_used_queries = 0;
         self.num_resolved_queries = 0;
-        self.buffer_mapping = None;
+        self.buffer_mapping_done.store(false, Ordering::Relaxed);
         self.buffer.unmap();
     }
 
